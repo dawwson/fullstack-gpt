@@ -1,35 +1,55 @@
-import time
+from langchain_classic.embeddings import CacheBackedEmbeddings
+from langchain_classic.storage import LocalFileStore
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_unstructured import UnstructuredLoader
+from langchain_community.vectorstores.utils import filter_complex_metadata
 import streamlit as st
 
-st.title("Document GPT")
+st.set_page_config(page_title="Document GPT", page_icon="📄")
 
-# Initialize session state for messages
-if "messages" not in st.session_state:
-  st.session_state["messages"] = []
+st.markdown(
+  """
+  Welcome!
+              
+  Use this chatbot to ask questions to an AI about your files!
+  """
+)
 
-# Function to send a message and save it to session state
-def send_message(message, role, save=True):
-  # Display the message in the chat interface
-  with st.chat_message(role):
-    st.write(message)
-  # Save the message to session state if save is True
-  if save:
-    st.session_state["messages"].append({"message": message, "role": role})
+def embed_file(file):
+  file_content = file.read()
+  file_path = f"./.cache/files/{file.name}"
 
-# Load previous messages from session state and display them (save=False to avoid duplication)
-for message in st.session_state["messages"]:
-  send_message(message["message"], message["role"], save=False)
+  with open(file_path, "wb") as f:
+    f.write(file_content)
+  
+  splitter = CharacterTextSplitter.from_tiktoken_encoder(
+    separator="\n",
+    chunk_size=600,
+    chunk_overlap=100,
+  )
 
-message = st.chat_input("Type your message here...")
+  loader = UnstructuredLoader(file_path)
 
-# Process the user's message
-if message:
-  # save=True to save the user's message to session state
-  send_message(message, "human")
-  time.sleep(3)
-  send_message(f"You said: {message}", "ai")
+  docs = filter_complex_metadata(loader.load_and_split(text_splitter=splitter))
 
-  with st.sidebar:
-    st.write(st.session_state)
+  embeddings = OpenAIEmbeddings()
 
+  cache_dir = LocalFileStore(f"./.cache/embeddings/{file.name}")
+
+  cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, cache_dir)
+
+  vectorstore = FAISS.from_documents(docs, cached_embeddings)
+
+  retriever = vectorstore.as_retriever()
+
+  return retriever
+
+
+file = st.file_uploader("Upload a file", type=["pdf", "txt", "docx"])
+
+if file:
+  retriever = embed_file(file)
+  retriever.invoke("winston")
 
