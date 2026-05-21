@@ -1,6 +1,7 @@
 from langchain_classic.embeddings import CacheBackedEmbeddings
 from langchain_classic.storage import LocalFileStore
 from langchain_community.vectorstores import FAISS
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -24,9 +25,28 @@ st.markdown(
 with st.sidebar:
   file = st.file_uploader("Upload a file", type=["pdf", "txt", "docx"])
 
+class ChatCallbackHandler(BaseCallbackHandler):
+  message = ""
+  
+  def on_llm_start(self, *args, **kwargs):
+    # LLM이 시작될 때 빈 메시지 박스를 생성하여 실시간으로 토큰을 표시할 준비를 한다.
+    self.message_box = st.empty()
+  
+  def on_llm_end(self, *args, **kwargs):
+    # LLM이 종료될 때 메시지 박스를 업데이트하여 완료된 메시지를 표시한다.
+    save_message("ai", self.message)
+
+  def on_llm_new_token(self, token, *args, **kwargs):
+    # LLM이 새로운 토큰을 생성할 때마다 생성된 토큰을 메시지에 추가하고, 메시지 박스를 업데이트하여 실시간으로 토큰이 표시되도록 한다.
+    self.message += token
+    self.message_box.markdown(self.message)
 
 llm = ChatOpenAI(
   temperature=0.1,
+  streaming=True,
+  callbacks=[
+    ChatCallbackHandler(),
+  ]
 )
 
 
@@ -62,12 +82,16 @@ def embed_file(file):
   return retriever
 
 
+# 메시지를 메시지 기록에 저장하는 함수
+def save_message(role, message):
+  st.session_state.messages.append({"role": role, "message": message})
+
 # 메시지를 화면에 표시하고, 메시지 기록에 저장하는 함수
 def send_message(role, message, save=True):
   with st.chat_message(role):
     st.markdown(message)
   if save:
-    st.session_state.messages.append({"role": role, "message": message})
+    save_message(role, message)
 
 
 # 메시지 기록을 화면에 표시하는 함수
@@ -114,8 +138,8 @@ if file:
       "question": RunnablePassthrough(), # 질문은 그대로 LLM에 전달
     } | prompt | llm # 프롬프트 템플릿에 따라 LLM에 전달
     
-    reponse = chain.invoke(message) # 체인 실행 결과(LLM의 답변)를 response에 저장
-    send_message("ai", reponse.content)
+    with st.chat_message("ai"):
+      response = chain.invoke(message) # 체인 실행 결과(LLM의 답변)를 response에 저장
 
 else:
   st.session_state.messages = []
