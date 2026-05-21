@@ -1,7 +1,9 @@
 from langchain_classic.embeddings import CacheBackedEmbeddings
 from langchain_classic.storage import LocalFileStore
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_unstructured import UnstructuredLoader
 from langchain_community.vectorstores.utils import filter_complex_metadata
@@ -18,6 +20,15 @@ st.markdown(
   Upload your files on the sidebar
   """
 )
+
+with st.sidebar:
+  file = st.file_uploader("Upload a file", type=["pdf", "txt", "docx"])
+
+
+llm = ChatOpenAI(
+  temperature=0.1,
+)
+
 
 # 동일한 파일이 업로드되면 함수 실행을 건너 뛰고 캐싱했던 결과 반환
 @st.cache_resource(show_spinner="Embedding file...")  
@@ -64,8 +75,26 @@ def display_history():
   for message in st.session_state.messages:
     send_message(message["role"], message["message"], save=False)
 
-with st.sidebar:
-  file = st.file_uploader("Upload a file", type=["pdf", "txt", "docx"])
+
+def format_docs(docs):
+  "\n\n".join(document.page_content for document in docs)
+
+
+prompt = ChatPromptTemplate.from_messages(
+  [
+    (
+      "system", 
+      """
+      Answer the question using ONLY the following context.
+      If you don't know the answer, just say you don't know.
+      DON'T make anything up.
+
+      Context: {context}
+      """
+    ),
+    ("human", "{question}"),
+  ]
+)
 
 
 if file:
@@ -79,7 +108,15 @@ if file:
 
   if message:
     send_message("human", message)
-    send_message("ai", "dkjdkjskksdj")
+    
+    chain = {
+      "context": retriever | RunnableLambda(format_docs), # retriever로 검색한 결과를 format_docs 함수에 전달하여 포맷팅
+      "question": RunnablePassthrough(), # 질문은 그대로 LLM에 전달
+    } | prompt | llm # 프롬프트 템플릿에 따라 LLM에 전달
+    
+    reponse = chain.invoke(message) # 체인 실행 결과(LLM의 답변)를 response에 저장
+    send_message("ai", reponse.content)
+
 else:
   st.session_state.messages = []
     
