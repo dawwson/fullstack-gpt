@@ -25,6 +25,7 @@ st.markdown(
 with st.sidebar:
   file = st.file_uploader("Upload a file", type=["pdf", "txt", "docx"])
 
+
 class ChatCallbackHandler(BaseCallbackHandler):
   message = ""
   
@@ -41,6 +42,8 @@ class ChatCallbackHandler(BaseCallbackHandler):
     self.message += token
     self.message_box.markdown(self.message)
 
+
+# LLM 초기화
 llm = ChatOpenAI(
   temperature=0.1,
   streaming=True,
@@ -86,6 +89,7 @@ def embed_file(file):
 def save_message(role, message):
   st.session_state.messages.append({"role": role, "message": message})
 
+
 # 메시지를 화면에 표시하고, 메시지 기록에 저장하는 함수
 def send_message(role, message, save=True):
   with st.chat_message(role):
@@ -100,10 +104,12 @@ def display_history():
     send_message(message["role"], message["message"], save=False)
 
 
+# retriever로 검색한 결과를 포맷팅하는 함수
 def format_docs(docs):
-  "\n\n".join(document.page_content for document in docs)
+  return "\n\n".join(document.page_content for document in docs)
 
 
+# LLM에 전달할 프롬프트 템플릿 정의
 prompt = ChatPromptTemplate.from_messages(
   [
     (
@@ -133,15 +139,23 @@ if file:
   if message:
     send_message("human", message)
     
-    chain = {
-      "context": retriever | RunnableLambda(format_docs), # retriever로 검색한 결과를 format_docs 함수에 전달하여 포맷팅
-      "question": RunnablePassthrough(), # 질문은 그대로 LLM에 전달
-    } | prompt | llm # 프롬프트 템플릿에 따라 LLM에 전달
+    chain = (
+      {
+        # retriever로 검색한 결과를 format_docs 함수에 전달하여 포맷팅
+        "context": retriever | RunnableLambda(format_docs), 
+        # 질문은 그대로 LLM에 전달
+        "question": RunnablePassthrough(), 
+      }
+      | prompt 
+      | llm
+    )
     
+    # 체인 실행 결과(LLM의 답변)를 response에 저장
     with st.chat_message("ai"):
-      response = chain.invoke(message) # 체인 실행 결과(LLM의 답변)를 response에 저장
+      response = chain.invoke(message)
 
 else:
+  # 파일이 없으면 메시지 기록 초기화
   st.session_state.messages = []
     
 
