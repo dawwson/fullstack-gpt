@@ -56,8 +56,16 @@ class ChatCallbackHandler(BaseCallbackHandler):
         save_message("ai", self.message)
 
 
+def init_session_state():
+    st.session_state.setdefault("messages", [])
+    st.session_state.setdefault("file_name", None)
+
+
 def save_message(role, message):
-    st.session_state.messages.append({"role": role, "message": message})
+    init_session_state()
+    messages = st.session_state.get("messages", [])
+    messages.append({"role": role, "message": message})
+    st.session_state["messages"] = messages
 
 
 def send_message(role, message, save=True):
@@ -68,7 +76,8 @@ def send_message(role, message, save=True):
 
 
 def display_history():
-    for message in st.session_state.messages:
+    init_session_state()
+    for message in st.session_state.get("messages", []):
         send_message(message["role"], message["message"], save=False)
 
 
@@ -146,21 +155,17 @@ prompt = ChatPromptTemplate.from_messages(
 )
 
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+init_session_state()
 
-if "file_name" not in st.session_state:
-    st.session_state.file_name = None
-
-if file and st.session_state.file_name != file.name:
-    st.session_state.messages = []
-    st.session_state.file_name = file.name
+if file and st.session_state.get("file_name") != file.name:
+    st.session_state["messages"] = []
+    st.session_state["file_name"] = file.name
 
 if not openai_api_key:
     st.info("Enter your OpenAI API key in the sidebar to start.")
 elif not file:
-    st.session_state.messages = []
-    st.session_state.file_name = None
+    st.session_state["messages"] = []
+    st.session_state["file_name"] = None
     st.info("Upload a file in the sidebar to start chatting.")
 else:
     retriever = embed_file(file.name, file.getvalue(), openai_api_key)
@@ -181,13 +186,12 @@ else:
 
     if question:
         send_message("human", question)
+        chat_history = get_chat_history(st.session_state.get("messages", [])[:-1])
 
         chain = (
             {
                 "context": retriever | RunnableLambda(format_docs),
-                "chat_history": RunnableLambda(
-                    lambda _: get_chat_history(st.session_state.messages[:-1])
-                ),
+                "chat_history": RunnableLambda(lambda _: chat_history),
                 "question": RunnablePassthrough(),
             }
             | prompt
