@@ -14,12 +14,16 @@ st.markdown(
   Welcome!
               
   Use this chatbot to ask questions to an AI about your files!
+
+  Upload your files on the sidebar
   """
 )
 
+# 동일한 파일이 업로드되면 함수 실행을 건너 뛰고 캐싱했던 결과 반환
+@st.cache_resource(show_spinner="Embedding file...")  
 def embed_file(file):
   file_content = file.read()
-  file_path = f"./.cache/files/{file.name}"
+  file_path = f".cache/files/{file.name}"
 
   with open(file_path, "wb") as f:
     f.write(file_content)
@@ -36,7 +40,7 @@ def embed_file(file):
 
   embeddings = OpenAIEmbeddings()
 
-  cache_dir = LocalFileStore(f"./.cache/embeddings/{file.name}")
+  cache_dir = LocalFileStore(f".cache/embeddings/{file.name}")
 
   cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, cache_dir)
 
@@ -47,9 +51,36 @@ def embed_file(file):
   return retriever
 
 
-file = st.file_uploader("Upload a file", type=["pdf", "txt", "docx"])
+# 메시지를 화면에 표시하고, 메시지 기록에 저장하는 함수
+def send_message(role, message, save=True):
+  with st.chat_message(role):
+    st.markdown(message)
+  if save:
+    st.session_state.messages.append({"role": role, "message": message})
+
+
+# 메시지 기록을 화면에 표시하는 함수
+def display_history():
+  for message in st.session_state.messages:
+    send_message(message["role"], message["message"], save=False)
+
+with st.sidebar:
+  file = st.file_uploader("Upload a file", type=["pdf", "txt", "docx"])
+
 
 if file:
   retriever = embed_file(file)
-  retriever.invoke("winston")
+
+  send_message("ai", "I'm ready! Ask away!", save=False)
+
+  display_history()
+
+  message = st.chat_input("Ask a question about your file...")
+
+  if message:
+    send_message("human", message)
+    send_message("ai", "dkjdkjskksdj")
+else:
+  st.session_state.messages = []
+    
 
