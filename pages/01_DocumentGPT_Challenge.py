@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from langchain_classic.memory import ConversationBufferMemory
 import streamlit as st
 from langchain_classic.embeddings import CacheBackedEmbeddings
 from langchain_classic.storage import LocalFileStore
 from langchain_community.vectorstores import FAISS
 from langchain_community.vectorstores.utils import filter_complex_metadata
 from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -17,11 +17,6 @@ from langchain_unstructured import UnstructuredLoader
 REPOSITORY_URL = "https://github.com/dawwson/fullstack-gpt"
 APP_CODE_URL = f"{REPOSITORY_URL}/blob/main/pages/01_DocumentGPT_Challenge.py"
 CACHE_DIR = Path(".cache")
-
-MEMORY_KEY = "chat_history"
-INPUT_KEY = "question"
-OUTPUT_KEY = "answer"
-
 
 st.set_page_config(page_title="Document GPT Challenge", page_icon="📄")
 
@@ -61,24 +56,6 @@ class ChatCallbackHandler(BaseCallbackHandler):
         save_message("ai", self.message)
 
 
-# LLM 초기화
-llm = ChatOpenAI(
-  temperature=0.1,
-  streaming=True,
-  callbacks=[
-    ChatCallbackHandler(),
-  ]
-)
-
-# 메모리 초기화
-memory = ConversationBufferMemory(
-    memory_key=MEMORY_KEY,
-    input_key=INPUT_KEY,
-    output_key=OUTPUT_KEY,
-    return_messages=True,
-)
-
-
 def save_message(role, message):
     st.session_state.messages.append({"role": role, "message": message})
 
@@ -99,20 +76,25 @@ def format_docs(docs):
     return "\n\n".join(document.page_content for document in docs)
 
 
-def load_memory(_):
-    return memory.load_memory_variables({})["chat_history"]
+def get_chat_history(messages):
+    chat_history = []
+    for message in messages:
+        if message["role"] == "human":
+            chat_history.append(HumanMessage(content=message["message"]))
+        elif message["role"] == "ai":
+            chat_history.append(AIMessage(content=message["message"]))
+    return chat_history
 
 
 @st.cache_resource(show_spinner="Embedding file...")
-def embed_file(file, api_key):
-  file_content = file.read()
-  file_name = file.name
-  
-  file_path = str(CACHE_DIR / "files" / file_name)
-  embeddings_cache_dir = str(CACHE_DIR / "embeddings" / file_name)
+def embed_file(file_name, file_content, api_key):
+    files_dir = CACHE_DIR / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
 
-  with open(file_path, "wb") as f:
-    f.write(file_content)
+    file_path = files_dir / file_name
+    embeddings_cache_dir = CACHE_DIR / "embeddings" / file_name
+
+    file_path.write_bytes(file_content)
 
     # 1. 문서 로드 & 분할
     splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
@@ -120,15 +102,15 @@ def embed_file(file, api_key):
         chunk_overlap=300,
     )
 
-    loader = UnstructuredLoader(file_path)
-    
+    loader = UnstructuredLoader(str(file_path))
+
     docs = filter_complex_metadata(loader.load_and_split(text_splitter=splitter))
 
     # 2. 임베딩 생성 & 캐싱
     embeddings = OpenAIEmbeddings(openai_api_key=api_key)
-    
-    local_cache_dir = LocalFileStore(embeddings_cache_dir)
-    
+
+    local_cache_dir = LocalFileStore(str(embeddings_cache_dir))
+
     cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, local_cache_dir)
 
     # 3. 벡터 스토어 생성 및 retriever 변환
@@ -138,7 +120,7 @@ def embed_file(file, api_key):
         search_type="similarity",
         search_kwargs={"k": 3},
     )
-    
+
     return retriever
 
 
@@ -164,7 +146,6 @@ prompt = ChatPromptTemplate.from_messages(
 )
 
 
-# 파
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -182,7 +163,15 @@ elif not file:
     st.session_state.file_name = None
     st.info("Upload a file in the sidebar to start chatting.")
 else:
-    retriever = embed_file(file, openai_api_key)
+    retriever = embed_file(file.name, file.getvalue(), openai_api_key)
+    llm = ChatOpenAI(
+        temperature=0.1,
+        streaming=True,
+        callbacks=[
+            ChatCallbackHandler(),
+        ],
+        openai_api_key=openai_api_key,
+    )
 
     send_message("ai", "I'm ready! Ask away!", save=False)
     
@@ -196,7 +185,9 @@ else:
         chain = (
             {
                 "context": retriever | RunnableLambda(format_docs),
-                "chat_history": RunnableLambda(load_memory),
+                "chat_history": RunnableLambda(
+                    lambda _: get_chat_history(st.session_state.messages[:-1])
+                ),
                 "question": RunnablePassthrough(),
             }
             | prompt
