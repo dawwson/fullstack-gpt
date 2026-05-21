@@ -12,6 +12,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_unstructured import UnstructuredLoader
+from openai import AuthenticationError, OpenAIError
 
 
 REPOSITORY_URL = "https://github.com/dawwson/fullstack-gpt"
@@ -106,6 +107,14 @@ def get_chat_history(messages):
     return chat_history
 
 
+def show_invalid_api_key_error():
+    # 인증 실패는 traceback 대신 사용자가 바로 이해할 수 있는 안내 UI로 표시한다.
+    st.error(
+        "OpenAI API key가 유효하지 않습니다. "
+        "사이드바에 올바른 API key를 다시 입력해 주세요."
+    )
+
+
 @st.cache_resource(show_spinner="Embedding file...")
 def embed_file(file_name, file_content, api_key):
     # 업로드 파일과 임베딩 결과를 로컬에 캐싱해 같은 파일의 반복 처리 비용을 줄인다.
@@ -186,7 +195,15 @@ elif not file:
     st.info("Upload a file in the sidebar to start chatting.")
 else:
     # 파일을 벡터 검색기로 변환하고, 사용자 API 키로 스트리밍 LLM을 초기화한다.
-    retriever = embed_file(file.name, file.getvalue(), openai_api_key)
+    try:
+        retriever = embed_file(file.name, file.getvalue(), openai_api_key)
+    except AuthenticationError:
+        show_invalid_api_key_error()
+        st.stop()
+    except OpenAIError as error:
+        st.error(f"OpenAI API 요청 중 오류가 발생했습니다: {error}")
+        st.stop()
+
     llm = ChatOpenAI(
         temperature=0.1,
         streaming=True,
@@ -219,4 +236,9 @@ else:
         )
 
         with st.chat_message("ai"):
-            chain.invoke(question)
+            try:
+                chain.invoke(question)
+            except AuthenticationError:
+                show_invalid_api_key_error()
+            except OpenAIError as error:
+                st.error(f"OpenAI API 요청 중 오류가 발생했습니다: {error}")
