@@ -16,7 +16,7 @@ from openai import AuthenticationError, OpenAIError
 
 
 REPOSITORY_URL = "https://github.com/dawwson/fullstack-gpt"
-APP_CODE_URL = f"{REPOSITORY_URL}/blob/main/pages/01_DocumentGPT_Challenge.py"
+APP_CODE_URL = f"{REPOSITORY_URL}/blob/main/app.py"
 CACHE_DIR = Path(".cache")
 
 # Streamlit 페이지의 기본 메타데이터와 첫 화면 안내 문구를 설정한다.
