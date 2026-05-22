@@ -115,20 +115,15 @@ def format_docs(docs):
 
 
 # LLM에 전달할 프롬프트 템플릿 정의
-prompt = ChatPromptTemplate.from_messages(
-  [
-    (
-      "system", 
-      """
-      Answer the question using ONLY the following context.
-      If you don't know the answer, just say you don't know.
-      DON'T make anything up.
+prompt = ChatPromptTemplate.from_template(
+  """
+  Answer the question using ONLY the following context and not your training data.
+  If you don't know the answer, just say you don't know.
+  DON'T make anything up.
 
-      Context: {context}
-      """
-    ),
-    ("human", "{question}"),
-  ]
+  Context: {context}
+  Question: {question}
+  """
 )
 
 
