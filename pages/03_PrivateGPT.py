@@ -1,10 +1,11 @@
 from langchain_classic.embeddings import CacheBackedEmbeddings
 from langchain_classic.storage import LocalFileStore
+from langchain_community.chat_models import ChatOllama
+from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_unstructured import UnstructuredLoader
 from langchain_community.vectorstores.utils import filter_complex_metadata
@@ -47,7 +48,8 @@ class ChatCallbackHandler(BaseCallbackHandler):
 
 
 # LLM 초기화
-llm = ChatOpenAI(
+llm = ChatOllama(
+  model="mistral:latest",
   temperature=0.1,
   streaming=True,
   callbacks=[
@@ -60,7 +62,7 @@ llm = ChatOpenAI(
 @st.cache_resource(show_spinner="Embedding file...")  
 def embed_file(file):
   file_content = file.read()
-  file_path = f"./.cache/privae_files/{file.name}"
+  file_path = f"./.cache/private_files/{file.name}"
 
   with open(file_path, "wb") as f:
     f.write(file_content)
@@ -75,7 +77,7 @@ def embed_file(file):
 
   docs = filter_complex_metadata(loader.load_and_split(text_splitter=splitter))
 
-  embeddings = OpenAIEmbeddings()
+  embeddings = OllamaEmbeddings(model="mistral:latest")
 
   cache_dir = LocalFileStore(f"./.cache/private_embeddings/{file.name}")
 
