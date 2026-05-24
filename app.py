@@ -10,7 +10,7 @@ from langchain_unstructured import UnstructuredLoader
 
 
 REPOSITORY_URL = "https://github.com/dawwson/fullstack-gpt"
-APP_CODE_URL = f"{REPOSITORY_URL}/blob/main/pages/03_QuizGPT.py"
+APP_CODE_URL = f"{REPOSITORY_URL}/blob/main/app.py"
 CACHE_DIR = Path(".cache/quiz_files")
 
 # OpenAI 함수 호출에 사용할 스키마다.
