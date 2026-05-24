@@ -276,14 +276,28 @@ if not docs:
   )
 
 else: 
-  start = st.button("Generate Quiz")
+  try:
+    # FIXME: 파일 내용이 달라도 파일명이 같으면 캐싱될 수 있으므로 다른 방법을 고민해볼 필요가 있음
+    response = run_quiz_chain(docs, topic if topic else file.name)
+    
+    with st.form("questions_form"):
+      for question in response["questions"]:
+        st.write("Q. " + question["question"])
+        
+        selected = st.radio(
+          "Select an option", 
+          [answer["answer"] for answer in question["answers"]],
+          index=None
+        )
 
-  if start:
-    try:
-      # FIXME: 파일 내용이 달라도 파일명이 같으면 캐싱될 수 있으므로 다른 방법을 고민해볼 필요가 있음
-      response = run_quiz_chain(docs, topic if topic else file.name)
-      st.write(response)
+        is_correct = {"answer": selected, "correct": True} in question["answers"]
+        
+        if is_correct:
+          st.success("Correct")
+        elif selected is not None:
+          st.error("Wrong")
+      button = st.form_submit_button()
 
-    except Exception as e:
-      st.exception(e)
+  except Exception as e:
+    st.exception(e)
 
