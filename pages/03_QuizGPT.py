@@ -13,7 +13,7 @@ class JsonOutputParser(BaseOutputParser):
   
   def parse(self, text):
     text = text.replace("```", "").replace("json", "")
-    return json.load(text)
+    return json.loads(text)
 
 
 output_parser = JsonOutputParser()
@@ -109,19 +109,19 @@ Example Output:
       "answers": [
         {{
           "answer": "Red",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "Yellow",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "Green",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "Blue",
-          "correct": True
+          "correct": true
         }}
       ]
     }},
@@ -130,19 +130,19 @@ Example Output:
       "answers": [
         {{
           "answer": "Baku",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "Tbilisi",
-          "correct": True
+          "correct": true
         }},
         {{
           "answer": "Manila",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "Beirut",
-          "correct": False
+          "correct": false
         }}
       ]
     }},
@@ -151,19 +151,19 @@ Example Output:
       "answers": [
         {{
           "answer": "2007",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "2001",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "2009",
-          "correct": True
+          "correct": true
         }},
         {{
           "answer": "1998",
-          "correct": False
+          "correct": false
         }}
       ]
     }},
@@ -172,19 +172,19 @@ Example Output:
       "answers": [
         {{
           "answer": "A Roman Emperor",
-          "correct": True
+          "correct": true
         }},
         {{
           "answer": "Painter",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "Actor",
-          "correct": False
+          "correct": false
         }},
         {{
           "answer": "Model",
-          "correct": False
+          "correct": false
         }}
       ]
     }}
