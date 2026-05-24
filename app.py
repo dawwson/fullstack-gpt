@@ -1,244 +1,324 @@
+import json
 from pathlib import Path
 
 import streamlit as st
-from langchain_classic.embeddings import CacheBackedEmbeddings
-from langchain_classic.storage import LocalFileStore
-from langchain_community.vectorstores import FAISS
-from langchain_community.vectorstores.utils import filter_complex_metadata
-from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.retrievers import WikipediaRetriever
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_text_splitters import CharacterTextSplitter
 from langchain_unstructured import UnstructuredLoader
-from openai import AuthenticationError, OpenAIError
 
 
 REPOSITORY_URL = "https://github.com/dawwson/fullstack-gpt"
-APP_CODE_URL = f"{REPOSITORY_URL}/blob/main/app.py"
-CACHE_DIR = Path(".cache")
+APP_CODE_URL = f"{REPOSITORY_URL}/blob/main/pages/03_QuizGPT.py"
+CACHE_DIR = Path(".cache/quiz_files")
 
-# Streamlit 페이지의 기본 메타데이터와 첫 화면 안내 문구를 설정한다.
-st.set_page_config(page_title="Document GPT Challenge", page_icon="📄")
+# OpenAI 함수 호출에 사용할 스키마다.
+# 모델은 일반 텍스트가 아니라 이 구조에 맞춘 arguments로 퀴즈를 반환한다.
+QUIZ_FUNCTION = {
+  "name": "create_quiz",
+  "description": "Create a multiple-choice quiz from the provided context.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "questions": {
+        "type": "array",
+        "description": "The quiz questions.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "The question text.",
+            },
+            "answers": {
+              "type": "array",
+              "description": "Exactly four answer choices. One answer must be correct.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "answer": {
+                    "type": "string",
+                    "description": "The answer text.",
+                  },
+                  "correct": {
+                    "type": "boolean",
+                    "description": "Whether this answer is the correct one.",
+                  },
+                },
+                "required": ["answer", "correct"],
+              },
+            },
+          },
+          "required": ["question", "answers"],
+        },
+      },
+    },
+    "required": ["questions"],
+  },
+}
 
-st.title("Document GPT Challenge")
-st.markdown(
-    """
-    Upload a document and ask questions about it.
-    """
+
+st.set_page_config(
+  page_title="Quiz GPT",
+  page_icon="❓",
 )
 
-# 사이드바에는 사용자 API 키 입력, 문서 업로드, 과제 코드 링크를 배치한다.
-with st.sidebar:
-    openai_api_key = st.text_input(
-        "OpenAI API Key",
-        type="password",
-        placeholder="sk-...",
-    )
-    file = st.file_uploader("Upload a file", type=["pdf", "txt", "docx"])
-
-    st.divider()
-    st.link_button("GitHub Repository", REPOSITORY_URL)
-    st.link_button("Streamlit App Code", APP_CODE_URL)
-
-
-class ChatCallbackHandler(BaseCallbackHandler):
-    # OpenAI 응답을 토큰 단위로 받아 Streamlit 화면에 실시간으로 표시한다.
-    def __init__(self):
-        self.message = ""
-        self.message_box = None
-
-    def on_llm_start(self, *args, **kwargs):
-        self.message = ""
-        self.message_box = st.empty()
-
-    def on_llm_new_token(self, token, *args, **kwargs):
-        self.message += token
-        self.message_box.markdown(self.message)
-
-    def on_llm_end(self, *args, **kwargs):
-        save_message("ai", self.message)
+st.title("Quiz GPT")
 
 
 def init_session_state():
-    # Streamlit은 위젯 입력마다 스크립트를 다시 실행한다.
-    # 같은 세션에서 유지해야 할 값은 session_state에 명시적으로 둔다.
-    st.session_state.setdefault("messages", [])
-    st.session_state.setdefault("file_name", None)
+  # Streamlit은 위젯 이벤트마다 스크립트를 다시 실행하므로,
+  # 생성된 퀴즈와 채점 상태는 session_state에 보관한다.
+  st.session_state.setdefault("quiz", None)
+  st.session_state.setdefault("quiz_source", None)
+  st.session_state.setdefault("score", None)
+  st.session_state.setdefault("attempt", 0)
 
 
-def save_message(role, message):
-    # 화면 재렌더링과 다음 질문의 chat_history 구성을 위해 메시지를 세션에 저장한다.
-    init_session_state()
-    messages = st.session_state.get("messages", [])
-    messages.append({"role": role, "message": message})
-    st.session_state["messages"] = messages
-
-
-def send_message(role, message, save=True):
-    # 채팅 말풍선을 그리고, 필요한 경우 같은 내용을 세션 기록에도 남긴다.
-    with st.chat_message(role):
-        st.markdown(message)
-    if save:
-        save_message(role, message)
-
-
-def display_history():
-    # rerun 이후에도 같은 세션의 이전 대화를 화면에 다시 그린다.
-    init_session_state()
-    for message in st.session_state.get("messages", []):
-        send_message(message["role"], message["message"], save=False)
+def reset_quiz():
+  # 파일, 위키피디아 주제, 난이도가 바뀌면 이전 퀴즈는 더 이상 유효하지 않다.
+  st.session_state["quiz"] = None
+  st.session_state["quiz_source"] = None
+  st.session_state["score"] = None
+  st.session_state["attempt"] = 0
 
 
 def format_docs(docs):
-    # 검색된 문서 조각들을 LLM 프롬프트에 넣기 쉬운 하나의 문자열로 합친다.
-    return "\n\n".join(document.page_content for document in docs)
+  # LangChain Document 목록을 프롬프트에 넣기 쉬운 하나의 문자열로 합친다.
+  return "\n\n".join(document.page_content for document in docs)
 
 
-def get_chat_history(messages):
-    # 저장된 채팅 기록을 LangChain 프롬프트가 이해할 수 있는 메시지 객체 목록(dict)으로 변환한다.
-    chat_history = []
-    for message in messages:
-        if message["role"] == "human":
-            chat_history.append(HumanMessage(content=message["message"]))
-        elif message["role"] == "ai":
-            chat_history.append(AIMessage(content=message["message"]))
-    return chat_history
+@st.cache_resource(show_spinner="Loading file...")
+def split_file(file):
+  # 업로드된 파일을 캐시 폴더에 저장한 뒤, LLM 입력에 적당한 크기로 분할한다.
+  CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+  file_content = file.read()
+  file_path = CACHE_DIR / file.name
+
+  with open(file_path, "wb") as f:
+    f.write(file_content)
+
+  splitter = CharacterTextSplitter.from_tiktoken_encoder(
+    separator="\n",
+    chunk_size=600,
+    chunk_overlap=100,
+  )
+
+  loader = UnstructuredLoader(str(file_path))
+  docs = loader.load_and_split(text_splitter=splitter)
+
+  return docs
 
 
-def show_invalid_api_key_error():
-    # 인증 실패는 traceback 대신 사용자가 바로 이해할 수 있는 안내 UI로 표시한다.
-    st.error(
-        "OpenAI API key가 유효하지 않습니다. "
-        "사이드바에 올바른 API key를 다시 입력해 주세요."
+@st.cache_data(show_spinner="Searching Wikipedia...")
+def wiki_search(term):
+  # 선택한 주제와 관련된 한국어 위키피디아 문서를 가져온다.
+  retriever = WikipediaRetriever(top_k_results=5, lang="ko")
+  docs = retriever.invoke(term)
+  return docs
+
+
+def make_llm(openai_api_key):
+  # create_quiz 함수 호출을 강제해서 퀴즈 결과를 안정적인 JSON 인자로 받는다.
+  return ChatOpenAI(
+    temperature=0.1,
+    model="gpt-4o-mini-2024-07-18",
+    openai_api_key=openai_api_key,
+  ).bind(
+    functions=[QUIZ_FUNCTION],
+    function_call={"name": "create_quiz"},
+  )
+
+
+def generate_quiz(docs, difficulty, openai_api_key):
+  # 문서 내용과 난이도를 프롬프트에 넣고, 함수 호출 결과에서 퀴즈 데이터를 꺼낸다.
+  prompt = ChatPromptTemplate.from_messages([
+    (
+      "system",
+      """
+You are a helpful teacher.
+
+Based ONLY on the following context, create 10 multiple-choice questions.
+The selected difficulty is: {difficulty}.
+
+Rules:
+- Each question must have exactly 4 answers.
+- Exactly one answer per question must be correct.
+- Make the questions easy when the difficulty is Easy.
+- Make the questions balanced when the difficulty is Medium.
+- Make the questions require careful reading and inference when the difficulty is Hard.
+- Return the quiz by calling the create_quiz function.
+
+Context: {context}
+""",
     )
+  ])
+
+  chain = prompt | make_llm(openai_api_key)
+  response = chain.invoke({
+    "context": format_docs(docs),
+    "difficulty": difficulty,
+  })
+
+  function_call = response.additional_kwargs.get("function_call", {})
+  arguments = function_call.get("arguments")
+
+  if not arguments:
+    raise ValueError("The model did not return quiz data through function calling.")
+
+  # function_call.arguments는 문자열이므로 Python dict로 변환한다.
+  return json.loads(arguments)
 
 
-@st.cache_resource(show_spinner="Embedding file...")
-def embed_file(file_name, file_content, api_key):
-    # 업로드 파일과 임베딩 결과를 로컬에 캐싱해 같은 파일의 반복 처리 비용을 줄인다.
-    files_dir = CACHE_DIR / "files"
-    files_dir.mkdir(parents=True, exist_ok=True)
+def display_quiz(quiz):
+  # 생성된 문제를 radio 버튼으로 표시하고, 제출 시 사용자의 선택을 채점한다.
+  with st.form(f"questions_form_{st.session_state['attempt']}"):
+    selections = []
 
-    file_path = files_dir / file_name
-    embeddings_cache_dir = CACHE_DIR / "embeddings" / file_name
+    for index, question in enumerate(quiz["questions"]):
+      st.write(f"Q{index + 1}. {question['question']}")
 
-    file_path.write_bytes(file_content)
+      selected = st.radio(
+        "Select an option",
+        [answer["answer"] for answer in question["answers"]],
+        index=None,
+        key=f"question_{st.session_state['attempt']}_{index}",
+      )
+      selections.append(selected)
 
-    # 1. 문서를 로드하고 검색에 적합한 크기의 chunk로 분할한다.
-    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-        chunk_size=1200,
-        chunk_overlap=300,
-    )
+    submitted = st.form_submit_button("Submit Exam")
 
-    loader = UnstructuredLoader(str(file_path))
+  if submitted:
+    score = 0
 
-    docs = filter_complex_metadata(loader.load_and_split(text_splitter=splitter))
+    for selected, question in zip(selections, quiz["questions"]):
+      correct_answer = next(
+        answer["answer"] for answer in question["answers"] if answer["correct"]
+      )
 
-    # 2. 사용자 API 키로 임베딩을 만들고, 같은 chunk는 파일 캐시에 재사용한다.
-    embeddings = OpenAIEmbeddings(openai_api_key=api_key)
+      if selected == correct_answer:
+        score += 1
 
-    local_cache_dir = LocalFileStore(str(embeddings_cache_dir))
-
-    cached_embeddings = CacheBackedEmbeddings.from_bytes_store(
-        embeddings,
-        local_cache_dir,
-    )
-
-    # 3. FAISS 벡터 스토어를 만들고 질문과 유사한 chunk를 찾는 retriever로 변환한다.
-    vectorstore = FAISS.from_documents(docs, cached_embeddings)
-
-    retriever = vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": 3},
-    )
-
-    return retriever
+    st.session_state["score"] = score
 
 
-# 검색 결과와 대화 기록을 함께 받아 답변하도록 프롬프트를 구성한다.
-prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            """
-            You are an AI assistant performing document-based question answering.
-            Answer using ONLY the provided context.
-            If the context does not contain the answer, say "I don't know."
-            Keep answers short and clear.
-            Use the chat history only when it helps understand the user's latest question.
+def display_score(quiz):
+  # 만점이면 축하 효과를 보여주고, 만점이 아니면 같은 퀴즈를 다시 풀 수 있게 한다.
+  score = st.session_state["score"]
 
-            Context:
-            {context}
-            """,
-        ),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{question}"),
-    ]
-)
+  if score is None:
+    return
+
+  total = len(quiz["questions"])
+  st.subheader(f"Score: {score} / {total}")
+
+  if score == total:
+    st.success("Perfect score!")
+    st.balloons()
+  else:
+    st.error("Not a perfect score. Try again.")
+
+    if st.button("Retake Exam"):
+      st.session_state["score"] = None
+      st.session_state["attempt"] += 1
+      st.rerun()
 
 
 init_session_state()
 
-# 파일이 바뀌면 이전 문서에 대한 대화 기록은 더 이상 유효하지 않으므로 초기화한다.
-if file and st.session_state.get("file_name") != file.name:
-    st.session_state["messages"] = []
-    st.session_state["file_name"] = file.name
+# 사이드바는 API 키, 난이도, 퀴즈 생성에 사용할 자료 선택을 담당한다.
+with st.sidebar:
+  docs = None
+  # source_id는 현재 선택된 자료와 난이도를 식별하는 값이다.
+  # 캐시/session_state에 남아 있는 이전 퀴즈가 현재 입력과 맞는지 비교할 때 사용한다.
+  source_id = None
 
-# API 키와 파일이 모두 준비된 뒤에만 RAG 파이프라인과 LLM 호출을 실행한다.
-if not openai_api_key:
-    st.info("Enter your OpenAI API key in the sidebar to start.")
-elif not file:
-    st.session_state["messages"] = []
-    st.session_state["file_name"] = None
-    st.info("Upload a file in the sidebar to start chatting.")
-else:
-    # 파일을 벡터 검색기로 변환하고, 사용자 API 키로 스트리밍 LLM을 초기화한다.
-    try:
-        retriever = embed_file(file.name, file.getvalue(), openai_api_key)
-    except AuthenticationError:
-        show_invalid_api_key_error()
-        st.stop()
-    except OpenAIError as error:
-        st.error(f"OpenAI API 요청 중 오류가 발생했습니다: {error}")
-        st.stop()
+  openai_api_key = st.text_input(
+    "OpenAI API Key",
+    type="password",
+    placeholder="sk-...",
+  )
 
-    llm = ChatOpenAI(
-        temperature=0.1,
-        streaming=True,
-        callbacks=[
-            ChatCallbackHandler(),
-        ],
-        openai_api_key=openai_api_key,
+  difficulty = st.selectbox(
+    "Exam difficulty",
+    (
+      "Easy",
+      "Medium",
+      "Hard",
+    ),
+  )
+
+  choice = st.selectbox(
+    "Choose what you want to use",
+    (
+      "File",
+      "Wikipedia Article",
+    ),
+  )
+
+  if choice == "File":
+    file = st.file_uploader(
+      "Upload a .docx, .txt, or .pdf file",
+      type=["docx", "pdf", "txt"],
     )
 
-    send_message("ai", "I'm ready! Ask away!", save=False)
-    
-    display_history()
+    if file:
+      docs = split_file(file)
+      source_id = f"file:{file.name}:{difficulty}"
 
-    question = st.chat_input("Ask a question about your file...")
+  else:
+    topic = st.text_input("Name of the article")
 
-    if question:
-        send_message("human", question)
-        # 현재 질문은 별도 입력으로 들어가므로, history에는 그 이전 대화만 포함한다.
-        chat_history = get_chat_history(st.session_state.get("messages", [])[:-1])
+    if topic:
+      docs = wiki_search(topic)
+      source_id = f"wiki:{topic}:{difficulty}"
 
-        # 질문 -> 관련 문서 검색 -> 프롬프트 구성 -> LLM 호출 순서로 RAG 체인을 실행한다.
-        chain = (
-            {
-                "context": retriever | RunnableLambda(format_docs),
-                "chat_history": RunnableLambda(lambda _: chat_history),
-                "question": RunnablePassthrough(),
-            }
-            | prompt
-            | llm
-        )
+  st.divider()
+  st.link_button("GitHub Repository", REPOSITORY_URL)
+  st.link_button("Streamlit App Code", APP_CODE_URL)
 
-        with st.chat_message("ai"):
-            try:
-                chain.invoke(question)
-            except AuthenticationError:
-                show_invalid_api_key_error()
-            except OpenAIError as error:
-                st.error(f"OpenAI API 요청 중 오류가 발생했습니다: {error}")
+if not openai_api_key:
+  st.info("Enter your OpenAI API key in the sidebar to start.")
+
+elif not docs:
+  st.markdown(
+    """
+    Welcome to QuizGPT.
+
+    I will make a quiz from Wikipedia articles or files you upload to test your knowledge and help you study.
+
+    Get started by uploading a file or searching on Wikipedia in the sidebar.
+    """
+  )
+
+else:
+  # source_id가 달라졌다면 사용자가 다른 자료나 난이도를 선택한 것이므로,
+  # session_state에 남아 있던 이전 퀴즈와 점수를 초기화한다.
+  if source_id != st.session_state["quiz_source"]:
+    reset_quiz()
+
+  st.markdown(
+    "QuizGPT creates a 10-question multiple-choice exam from your selected file "
+    "or Wikipedia article."
+  )
+
+  if st.button("Generate Quiz"):
+    try:
+      # LLM 호출은 시간이 걸릴 수 있으므로 사용자에게 진행 상태를 표시한다.
+      with st.status("Generating quiz...", expanded=True) as status:
+        st.write("Reading the selected content and asking the model to create questions.")
+        quiz = generate_quiz(docs, difficulty, openai_api_key)
+        status.update(label="Quiz generated.", state="complete", expanded=False)
+
+      st.session_state["quiz"] = quiz
+      st.session_state["quiz_source"] = source_id
+      st.session_state["score"] = None
+      st.session_state["attempt"] = 0
+    except Exception as e:
+      st.exception(e)
+
+  if st.session_state["quiz"]:
+    display_quiz(st.session_state["quiz"])
+    display_score(st.session_state["quiz"])
