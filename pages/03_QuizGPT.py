@@ -223,8 +223,25 @@ def split_file(file):
   return docs
 
 
+# NOTE: 
+# - streamlit이 캐싱하지 못하는 매개변수가 들어있는 경우 _(언더스코어)를 붙여서 캐시 계산에서 제외시킨다.
+# - 캐시 키로 사용하려는 다른 매개변수(topic)를 임시로 추가하였다.
+@st.cache_data(show_spinner="Making quiz...")
+def run_quiz_chain(_docs, topic):
+  chain = {"context": questions_chain} | formatting_chain | output_parser
+  return chain.invoke(_docs)
+
+
+@st.cache_data(show_spinner="Searching Wikipedia...")
+def wiki_search(term): 
+  retriever = WikipediaRetriever(top_k_results=5, lang="ko")
+  docs = retriever.invoke(term)
+  return docs
+
+
 with st.sidebar:
   docs = None
+  topic = None
 
   choice = st.selectbox(
     "Choose what you want to use", 
@@ -244,10 +261,7 @@ with st.sidebar:
     topic = st.text_input("Name of the article")
     
     if topic:
-      retriever = WikipediaRetriever(top_k_results=5, lang="ko")
-      
-      with st.status("Searching Wikipedia..."):
-          docs = retriever.invoke(topic)
+      docs = wiki_search(topic)
 
 
 if not docs:
@@ -266,10 +280,8 @@ else:
 
   if start:
     try:
-      chain = {"context": questions_chain} | formatting_chain | output_parser
-
-      response = chain.invoke(docs)
-
+      # FIXME: 파일 내용이 달라도 파일명이 같으면 캐싱될 수 있으므로 다른 방법을 고민해볼 필요가 있음
+      response = run_quiz_chain(docs, topic if topic else file.name)
       st.write(response)
 
     except Exception as e:
