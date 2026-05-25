@@ -67,7 +67,7 @@ gitdb==4.0.10
 GitPython==3.1.35
 googleapis-common-protos==1.75.0
 gpt4all==2.0.2
-greenlet==3.0.0
+greenlet==3.5.1
 grpcio==1.80.0
 h11==0.16.0
 h2==4.1.0
@@ -188,7 +188,7 @@ pydantic-settings==2.14.1
 pydantic_core==2.46.4
 pydeck==0.8.0
 pydub==0.25.1
-pyee==11.0.1
+pyee==13.0.1
 Pygments==2.16.1
 Pympler==1.0.1
 pypandoc==1.11
