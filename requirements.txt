@@ -169,7 +169,7 @@ pickleshare==0.7.5
 Pillow==9.5.0
 pinecone-client==2.2.4
 platformdirs==3.10.0
-playwright==1.39.0
+playwright==1.60.0
 portalocker==2.8.2
 posthog==3.0.2
 preshed==3.0.9
