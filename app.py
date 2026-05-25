@@ -274,12 +274,26 @@ if question:
 
   with st.chat_message("assistant"):
     try:
-      # RAG 흐름: 검색 -> 후보 답변 생성/점수화 -> 최종 답변 선택 -> 출처 링크 1개 추가.
-      retriever = load_cloudflare_docs(openai_api_key)
-      docs = retriever.invoke(question)
-      llm = make_llm(openai_api_key)
-      answers = get_answers(docs, question, llm)
-      answer, source = choose_answer(answers, question, llm)
+      status_placeholder = st.empty()
+
+      with status_placeholder.status("답변 생성 중...", expanded=True) as status:
+        # RAG 흐름: 검색 -> 후보 답변 생성/점수화 -> 최종 답변 선택 -> 출처 링크 1개 추가.
+        status.update(label="Cloudflare 문서를 불러오는 중...")
+        retriever = load_cloudflare_docs(openai_api_key)
+
+        status.update(label="관련 문서를 검색하는 중...")
+        docs = retriever.invoke(question)
+
+        status.update(label="답변 후보를 생성하는 중...")
+        llm = make_llm(openai_api_key)
+        answers = get_answers(docs, question, llm)
+
+        status.update(label="최종 답변을 정리하는 중...")
+        answer, source = choose_answer(answers, question, llm)
+
+        status.update(label="답변 생성 완료", state="complete")
+
+      status_placeholder.empty()
       source_link = format_source(source)
 
       if source_link:
