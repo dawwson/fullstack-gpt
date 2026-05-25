@@ -1,6 +1,10 @@
 
 from bs4 import BeautifulSoup
 from langchain_community.document_loaders import SitemapLoader
+from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import streamlit as st
 
@@ -27,6 +31,41 @@ with st.sidebar:
   )
 
 
+llm = ChatOpenAI(
+  temperature=0.1
+)
+
+
+answers_prompt = ChatPromptTemplate.from_template(
+"""
+Using ONLY the following context answer the user's question.
+If you can't just say you don't know, don't make anything up.
+
+Then, give a score to the answer between 0 and 5.
+The score should be high if the answer is related to the user's question, and low otherwise.
+If there is no relevant content, the score is 0.
+Always provide scores with your answers
+
+Make sure to include the answer's score.
+
+Context: {context}
+
+Examples:
+
+Question: How far away is the moon?
+Answer: The moon is 384,400 km away.
+Score: 5
+
+Question: How far away is the sun?
+Answer: I don't know
+Score: 0
+
+Your turn!
+Question: {question}
+"""
+)
+
+
 # header, footer 제거한 나머지 text 반환
 def parse_page(soup: BeautifulSoup):
   header = soup.find("header")
@@ -44,8 +83,7 @@ def parse_page(soup: BeautifulSoup):
   )
 
 
-
-@st.cache_data(show_spinner="Loading website...")
+@st.cache_resource(show_spinner="Loading website...")
 def load_website(url):
   splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
     chunk_size=1000,
@@ -68,7 +106,29 @@ def load_website(url):
     
   docs = loader.load_and_split(text_splitter=splitter)
 
-  return docs
+  embeddings = OpenAIEmbeddings()
+
+  vector_store = FAISS.from_documents(docs, embeddings)
+
+  retriever = vector_store.as_retriever()
+
+  return retriever
+
+def get_answers(inputs):
+  docs = inputs["docs"]
+  question = inputs["question"]
+
+  answers_chain = answers_prompt | llm
+  answers = []
+
+  for doc in docs:
+    result = answers_chain.invoke({
+      "question": question,
+      "context": doc.page_content
+    })
+    answers.append(result.content)
+
+  st.write(answers)
 
 
 if url:
@@ -78,5 +138,15 @@ if url:
       st.error("Please write down a Sitemap URL.")
   
   else:
-    docs = load_website(url)
-    st.write(docs)
+    retriever = load_website(url)
+
+    chain = (
+      {
+        "docs": retriever, 
+        "question": RunnablePassthrough()
+      }
+      | RunnableLambda(get_answers)
+    )
+    
+    chain.invoke("What is the AI Gateway?")
+    
