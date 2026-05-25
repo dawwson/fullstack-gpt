@@ -1,5 +1,5 @@
 
-from langchain_community.document_loaders import AsyncChromiumLoader
+from langchain_community.document_loaders import SitemapLoader
 from langchain_community.document_transformers import Html2TextTransformer
 import streamlit as st
 
@@ -28,13 +28,27 @@ with st.sidebar:
   )
 
 
-if url:
-  # async chromium loader
-  loader = AsyncChromiumLoader([url])
-  
-  docs = loader.load()
-  
-  # HTML 태그 제거
-  transformed = html2text_transformer.transform_documents(docs)
+@st.cache_data(show_spinner="Loading website...")
+def load_website(url):
+  loader = SitemapLoader(
+      url,
+      # FIXME: rate limit 문제로 추가하였음. 모든 페이지를 불러오지 못하므로 다른 해결방안 모색이 필요함
+      blocksize=10, # 10개씩 나눠서 긁어옴
+      blocknum=0,
+      continue_on_failure=True,
+    )
+    
+  loader.requests_per_second = 1
+    
+  return loader.load()
 
-  st.write(transformed)
+
+if url:
+  
+  if ".xml" not in url:
+    with st.sidebar:
+      st.error("Please write down a Sitemap URL.")
+  
+  else:
+    docs = load_website(url)
+    st.write(docs)
