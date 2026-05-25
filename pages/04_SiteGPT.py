@@ -1,4 +1,3 @@
-
 from bs4 import BeautifulSoup
 from langchain_community.document_loaders import SitemapLoader
 from langchain_community.vectorstores import FAISS
@@ -7,6 +6,9 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import streamlit as st
+
+
+# TODO: Code Challenge: 유사한 질문에 대한 저장해둔 답변을 반환하는 기능 (with function call)
 
 
 st.set_page_config(
