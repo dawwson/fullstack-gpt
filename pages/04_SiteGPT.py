@@ -46,7 +46,7 @@ The score should be high if the answer is related to the user's question, and lo
 If there is no relevant content, the score is 0.
 Always provide scores with your answers
 
-Make sure to include the answer's score.
+Make sure to include the answer's score even if it's 0.
 
 Context: {context}
 
@@ -61,9 +61,27 @@ Answer: I don't know
 Score: 0
 
 Your turn!
+
 Question: {question}
 """
 )
+
+
+choose_prompt = ChatPromptTemplate.from_messages([
+  (
+    "system",
+    """
+    Use ONLY the following pre-existing answers to answer the user's question.
+
+    Use the answers that have the highest score (more helpful) and favor the most recent ones.
+
+    Site sources and return the sources of the answers as they are, do not change them.
+
+    Answers: {answers}
+    """,
+  ),
+  ("human", "{question}"),
+])
 
 
 # header, footer 제거한 나머지 text 반환
@@ -92,6 +110,7 @@ def load_website(url):
 
   loader = SitemapLoader(
       url,
+      # TODO: url 수정 필요
       filter_urls=[
         r"^(.*\/ai-gateway\/).*", # /ai-gateway/를 포함하는 URL만 필터링
       ],
@@ -119,16 +138,38 @@ def get_answers(inputs):
   question = inputs["question"]
 
   answers_chain = answers_prompt | llm
-  answers = []
 
-  for doc in docs:
-    result = answers_chain.invoke({
-      "question": question,
-      "context": doc.page_content
-    })
-    answers.append(result.content)
+  return {
+    "question": question,
+    "answers": [
+      {
+        "answer": answers_chain.invoke(
+            {
+              "question": question,
+              "context": doc.page_content
+            }
+          ).content,
+        "source": doc.metadata["source"],
+        "date": doc.metadata["lastmod"],
+      } for doc in docs
+    ]
+  }
 
-  st.write(answers)
+
+def choose_answer(inputs):
+  answers = inputs["answers"]
+  question = inputs["question"]
+
+  choose_chain = choose_prompt | llm
+  
+  return choose_chain.invoke({
+    "question": question,
+    "answers": "\n\n".join(
+      f"{answer['answer']}\n" + 
+      f"Source:{answer['source']}\n" +
+      f"Date:{answer['date']}\n" 
+      for answer in answers)
+  })
 
 
 if url:
@@ -140,13 +181,18 @@ if url:
   else:
     retriever = load_website(url)
 
-    chain = (
-      {
-        "docs": retriever, 
-        "question": RunnablePassthrough()
-      }
-      | RunnableLambda(get_answers)
-    )
-    
-    chain.invoke("What is the AI Gateway?")
+    query = st.text_input("Ask a question to the website.")
+
+    if query:
+      chain = (
+        {
+          "docs": retriever, 
+          "question": RunnablePassthrough()
+        }
+        | RunnableLambda(get_answers)
+        | RunnableLambda(choose_answer)
+      )
+      
+      result = chain.invoke(query)
+      st.write(result.content)
     
