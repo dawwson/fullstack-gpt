@@ -1,9 +1,12 @@
 import os
 from pathlib import Path
+from langchain_classic.embeddings import CacheBackedEmbeddings
+from langchain_classic.storage import LocalFileStore
 from langchain_community.document_loaders import TextLoader
+from langchain_community.vectorstores import FAISS
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydub import AudioSegment
 import streamlit as st
@@ -33,6 +36,12 @@ Welcome to MeetingGPT, upload a video and I will give you a transcript, a summar
 
 Get started by uploading a video file in the sidebar.
 """
+)
+
+
+splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+  chunk_size=600,
+  chunk_overlap=100,
 )
 
 
@@ -88,6 +97,25 @@ def transcribe_chunks(chunk_folder, destination):
       text_file.write(transript.text)
 
 
+@st.cache_data()
+def embed_file(file_path: str):
+  loader = TextLoader(file_path)
+
+  docs = loader.load_and_split(text_splitter=splitter)
+
+  embeddings = OpenAIEmbeddings()
+
+  embedding_path = LocalFileStore(CACHE_DIR / "embeddings" / {os.path.basename(file_path)})
+
+  cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, embedding_path)
+
+  vectorstore = FAISS.from_documents(docs, cached_embeddings)
+
+  retriever = vectorstore.as_retriever()
+
+  return retriever
+
+
 with st.sidebar:
   video = st.file_uploader("Video", type=["mp4", "avi", "mkv", "mov"])
 
@@ -116,11 +144,6 @@ if video:
         )
 
         loader = TextLoader(transcript_path)
-
-        splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-          chunk_size=800,
-          chunk_overlap=50,
-        )
 
         docs = loader.load_and_split(text_splitter=splitter)
 
@@ -155,10 +178,23 @@ if video:
           
           for i, doc in enumerate(docs[1:]):
             status.update(label=f"Processing document {i+1} / {len(docs)-1}")
-            summary = refine_chain.invoke({"existing_summary": summary, "context": doc.page_content})
+            summary = refine_chain.invoke(
+              {
+                "existing_summary": summary, 
+                "context": doc.page_content
+              }
+            )
         
         st.write(summary)
 
+    with qa_tab:
+      pass
+      # TODO: Code Challenge - Chain 만들기
+      # retriever = embed_file(transcript_path)
+      # docs = retriever.invoke("Do they talk about marcus aurelius?")
+
+      
+      
 
   else:
     with st.status("Loading video...") as status:
