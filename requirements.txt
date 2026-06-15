@@ -40,6 +40,7 @@ dataclasses-json==0.6.7
 debugpy==1.8.0
 decorator==5.1.1
 dill==0.3.7
+ddgs==9.14.4
 distro==1.9.0
 dnspython==2.4.2
 duckduckgo-search==3.8.5
@@ -53,6 +54,7 @@ emoji==2.8.0
 et-xmlfile==1.1.0
 executing==1.2.0
 faiss-cpu==1.7.4
+fake-useragent==2.2.0
 fastapi==0.136.1
 ffmpeg==1.4
 ffmpeg-python==0.2.0
@@ -118,7 +120,7 @@ langgraph-sdk==0.3.14
 langsmith==0.8.5
 layoutparser==0.3.4
 loguru==0.7.2
-lxml==4.9.3
+lxml==6.1.1
 manifest-ml==0.0.1
 Markdown==3.4.4
 markdown-it-py==3.0.0
@@ -174,6 +176,7 @@ portalocker==2.8.2
 posthog==3.0.2
 preshed==3.0.9
 prompt-toolkit==3.0.39
+primp==1.3.1
 protobuf==6.33.6
 psutil==5.9.5
 ptyprocess==0.7.0
